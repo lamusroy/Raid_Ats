@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RAID // Tactical Arcade Shooter</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root { --panel-h: 130px; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #060a10;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    font-family: 'Share Tech Mono', monospace;
+    color: #e0f0ff;
+  }
+
+  #game-container {
+    position: relative;
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+  }
+
+  canvas {
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+  }
+
+  #hud {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 12px 16px;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .hud-block { display: flex; flex-direction: column; gap: 2px; }
+  .hud-label { font-size: 8px; letter-spacing: 3px; color: #2a6a9a; text-transform: uppercase; }
+  .hud-value { font-family: 'Orbitron', sans-serif; font-size: 16px; font-weight: 700; color: #00cfff; text-shadow: 0 0 10px rgba(0,207,255,0.5); }
+  .hud-value.danger  { color: #ff3a3a; text-shadow: 0 0 10px rgba(255,60,60,0.5); }
+  .hud-value.warning { color: #ffaa00; text-shadow: 0 0 10px rgba(255,170,0,0.5); }
+  /* Heart health states */
+  .hud-value.hearts-full  { color: #40ff70; text-shadow: 0 0 10px rgba(60,255,100,0.6); }
+  .hud-value.hearts-one-down { color: #ffcc00; text-shadow: 0 0 10px rgba(255,200,0,0.5); }
+  .hud-value.hearts-last  { color: #ff3a3a; text-shadow: 0 0 10px rgba(255,60,60,0.6); }
+  /* Armor tiers rendered inline — blue and white */
+
+  #ammo-bar { display: flex; flex-wrap: wrap; gap: 2px; max-width: 110px; margin-top: 2px; }
+  .ammo-pip { width: 6px; height: 10px; background: #00cfff; box-shadow: 0 0 4px rgba(0,207,255,0.4); }
+  .ammo-pip.empty { background: #122030; box-shadow: none; }
+
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(4,8,16,0.93);
+    z-index: 30;
+  }
+  #overlay h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(28px, 8vw, 48px);
+    font-weight: 900; letter-spacing: 10px;
+    color: #00cfff; text-shadow: 0 0 40px rgba(0,207,255,0.8);
+    margin-bottom: 6px;
+  }
+  .subtitle { font-size: 10px; letter-spacing: 4px; color: #2a6a9a; margin-bottom: 32px; }
+  .instructions { font-size: 12px; line-height: 2.4; color: #5a90b0; text-align: center; margin-bottom: 36px; padding: 0 20px; }
+  .instructions span { color: #00cfff; }
+  #start-btn {
+    font-family: 'Orbitron', sans-serif; font-size: 13px; letter-spacing: 4px;
+    padding: 16px 44px; background: transparent;
+    border: 2px solid #00cfff; color: #00cfff; cursor: pointer;
+    text-transform: uppercase; box-shadow: 0 0 20px rgba(0,207,255,0.2);
+  }
+  #start-btn:active { background: rgba(0,207,255,0.15); }
+
+  #kill-feed {
+    position: absolute; bottom: 110px; left: 14px;
+    display: flex; flex-direction: column-reverse; gap: 3px;
+    z-index: 10; pointer-events: none;
+  }
+  .kill-msg { font-size: 10px; letter-spacing: 2px; color: #ff6040; opacity: 1; transition: opacity 2s; }
+
+  #wave-announce {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(18px, 5vw, 28px); font-weight: 900;
+    color: #ffcc00; text-shadow: 0 0 30px rgba(255,200,0,0.8);
+    letter-spacing: 6px; pointer-events: none; z-index: 15;
+    opacity: 0; transition: opacity 0.3s; white-space: nowrap;
+  }
+
+  /* Control zone divider */
+
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="canvas"></canvas>
+  <canvas id="joystick-canvas"></canvas>
+
+  <!-- HUD sits inside game viewport -->
+  <div id="hud">
+    <div class="hud-block">
+      <div class="hud-label">HP</div>
+      <div class="hud-value" id="hud-lives"></div>
+    </div>
+    <div class="hud-block" style="align-items:center">
+      <div class="hud-label">Ammo</div>
+      <div class="hud-value" id="hud-ammo">0</div>
+    </div>
+    <div class="hud-block" style="align-items:center">
+      <div class="hud-label">LVL</div>
+      <div class="hud-value" id="hud-level">1</div>
+    </div>
+    <div class="hud-block" style="align-items:center">
+      <div class="hud-label">FOES</div>
+      <div class="hud-value" id="hud-foes">0</div>
+    </div>
+    <div class="hud-block" style="align-items:flex-end">
+      <div class="hud-label">Score</div>
+      <div class="hud-value" id="hud-score">000000</div>
+    </div>
+  </div>
+
+  <div id="kill-feed"></div>
+  <div id="wave-announce"></div>
+
+  <!-- Cabinet SVG frame — drawn over game, under controls -->
+  <svg id="cabinet-frame" xmlns="http://www.w3.org/2000/svg" id="cabinet-frame"></svg>
+
+  <!-- Control panel — DOM buttons, no canvas drawing -->
+  <div id="control-panel">
+    <div id="stick-housing">
+      <div id="stick-base"></div>
+      <div id="stick-knob"></div>
+    </div>
+    <button id="pause-btn">II</button>
+    <button id="fire-btn" class="idle">
+      <span class="fire-label">FIRE</span>
+    </button>
+  </div>
+
+  <div id="overlay">
+    <h1>RAID</h1>
+    <div class="subtitle">// TACTICAL ARCADE SHOOTER //</div>
+    <div class="instructions">
+      <span>Left stick</span> — Move &nbsp; <span>Fire btn</span> — Shoot<br>
+      Kill enemies to collect ammo.<br>
+      Conserve shots. Position wins rooms.
+    </div>
+    <button id="start-btn">INITIATE RAID</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const jCanvas = document.getElementById('joystick-canvas');
+const jCtx = jCanvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const hudLives = document.getElementById('hud-lives');
+const hudScore = document.getElementById('hud-score');
+const hudFoes  = document.getElementById('hud-foes');
+const hudAmmo  = document.getElementById('hud-ammo');
+const hudLevel = document.getElementById('hud-level');
+// ammo pip bar removed — using counter
+const killFeed = document.getElementById('kill-feed');
+const waveAnnounce = document.getElementById('wave-announce');
+
+// Game world is fixed logical size, scaled to fit screen
+const TILE = 24;
+// Map tiles grow every 3 levels, but COLS/ROWS are set from screen aspect ratio
+// so the map always fills the landscape viewport
+function mapTileCount(level) { return 20 + Math.floor((level-1)/3)*4; }
+let BASE_W = 480, BASE_H = 480;
+let COLS = 20, ROWS = 20;
+const MAX_AMMO = 25;
+
+// ── Weapon definitions ───────────────────────────────────────────
+// +24px (1 tile) player range bonus over foe weapon range
+const RANGE_BONUS = 24;
+const WEAPONS = {
+  pistol:  { range: 160, fireRate: 0.85, spread: 0.07, pellets: 1, bulletSpeed: 300, chargeTime: 0 },
+  rifle:   { range: 190, fireRate: 0.425,spread: 0.05, pellets: 1, bulletSpeed: 340, chargeTime: 0 },
+  shotgun: { range:  80, fireRate: 1.0,  spread: 0.12, pellets: 3, bulletSpeed: 300, chargeTime: 0 },
+  sniper:  { range: 350, fireRate: 4.0,  spread: 0.03, pellets: 1, bulletSpeed: 400, chargeTime: 2.0, infinite: true },
+};
+
+let VW, VH, SCALE, OX, OY;
+let VIEW_W, VIEW_H;
+const PANEL_H = 130; // compact control strip height
+
+function resize() {
+  VW = window.innerWidth;
+  VH = window.innerHeight;
+  SCALE = 1;
+  VIEW_W = VW;
+  VIEW_H = VH - PANEL_H;
+  canvas.width = VW; canvas.height = VH;
+  jCanvas.width = VW; jCanvas.height = VH;
+  const panel = document.getElementById('control-panel');
+  if (panel) panel.style.height = PANEL_H + 'px';
+  drawCabinetFrame();
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Screen -> game world coords (accounts for camera scroll)
+function toGame(sx, sy) {
+  if (!game.player) return { x: sx, y: sy };
+  const camX = Math.max(0, Math.min(BASE_W - VIEW_W, game.player.x - VIEW_W/2));
+  const camY = Math.max(0, Math.min(BASE_H - VIEW_H, game.player.y - VIEW_H/2));
+  return { x: sx + camX, y: sy + camY };
+}
+
+
+// ── SOUND ENGINE ─────────────────────────────────────────────────
+// All sounds synthesized via Web Audio API — no files needed
+let audioCtx = null;
+
+function getAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playTone({ freq=440, freq2=null, type='square', gain=0.15, attack=0.001, decay=0.08, duration=0.1, detune=0, filterFreq=null } = {}) {
+  try {
+    const ac = getAudio();
+    const osc = ac.createOscillator();
+    const env = ac.createGain();
+    const t   = ac.currentTime;
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (freq2) osc.frequency.exponentialRampToValueAtTime(freq2, t + duration);
+    if (detune) osc.detune.setValueAtTime(detune, t);
+
+    let node = osc;
+    if (filterFreq) {
+      const filt = ac.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.setValueAtTime(filterFreq, t);
+      osc.connect(filt);
+      filt.connect(env);
+    } else {
+      osc.connect(env);
+    }
+
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(gain, t + attack);
+    env.gain.exponentialRampToValueAtTime(0.001, t + attack + decay);
+    env.connect(ac.destination);
+
+    osc.start(t);
+    osc.stop(t + duration + 0.05);
+  } catch(e) {}
+}
+
+function playNoise({ gain=0.2, attack=0.001, decay=0.05, filterFreq=800 } = {}) {
+  try {
+    const ac = getAudio();
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.2, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src  = ac.createBufferSource();
+    const filt = ac.createBiquadFilter();
+    const env  = ac.createGain();
+    const t    = ac.currentTime;
+    src.buffer = buf;
+    filt.type = 'bandpass';
+    filt.frequency.setValueAtTime(filterFreq, t);
+    filt.Q.setValueAtTime(0.8, t);
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(gain, t + attack);
+    env.gain.exponentialRampToValueAtTime(0.001, t + attack + decay);
+    src.connect(filt); filt.connect(env); env.connect(ac.destination);
+    src.start(t); src.stop(t + decay + 0.05);
+  } catch(e) {}
+}
+
+// Named sound events
+const sfx = {
+  shoot()    { playTone({ freq:820, freq2:380, type:'square', gain:0.12, decay:0.07, duration:0.08, filterFreq:1800 }); },
+  enemyShoot(){ playTone({ freq:520, freq2:220, type:'sawtooth', gain:0.07, decay:0.06, duration:0.07, filterFreq:900 }); },
+  hit()      { playNoise({ gain:0.25, decay:0.06, filterFreq:600 }); },
+  kill()     { playTone({ freq:180, freq2:80,  type:'square', gain:0.18, decay:0.14, duration:0.15 });
+               setTimeout(()=>playTone({ freq:260, type:'square', gain:0.1, decay:0.08, duration:0.08 }), 60); },
+  melee()    { playNoise({ gain:0.35, decay:0.04, filterFreq:1200 });
+               playTone({ freq:120, type:'square', gain:0.15, decay:0.06, duration:0.06 }); },
+  playerHit(){ playNoise({ gain:0.4, decay:0.12, filterFreq:300 });
+               playTone({ freq:90, freq2:60, type:'sawtooth', gain:0.2, decay:0.2, duration:0.25 }); },
+  die()      { playTone({ freq:220, freq2:55, type:'sawtooth', gain:0.3, decay:0.6, duration:0.7 }); },
+  levelUp()  { [0,100,200].forEach((ms,i)=>setTimeout(()=>
+                 playTone({ freq:[440,550,660][i], type:'square', gain:0.12, decay:0.18, duration:0.2 }), ms)); },
+  empty()    { playTone({ freq:180, type:'square', gain:0.08, decay:0.04, duration:0.04 }); },
+};
+
+// ── INPUT ────────────────────────────────────────────────────────
+// Left stick: movement
+const leftStick = { active: false, id: null, baseX: 0, baseY: 0, dx: 0, dy: 0 };
+
+const STICK_MAX_R = 42; // left stick travel radius
+const rightStick = { active: false, id: null };
+let gamePaused = false;
+
+// Touch input on joystick canvas (left half only)
+jCanvas.style.pointerEvents = 'auto';
+jCanvas.addEventListener('touchstart',  onTouchStart, { passive: false });
+jCanvas.addEventListener('touchmove',   onTouchMove,  { passive: false });
+jCanvas.addEventListener('touchend',    onTouchEnd,   { passive: false });
+jCanvas.addEventListener('touchcancel', onTouchEnd,   { passive: false });
+
+// Desktop: WASD + spacebar
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+  if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('mousedown', e => { if (e.button===0) rightStick.active = true; });
+window.addEventListener('mouseup',   e => { if (e.button===0) rightStick.active = false; });
+
+// ── Pause button ───────────────────────────────────────────────
+function togglePause() {
+  if (game.state === 'gameover') return;
+  gamePaused = !gamePaused;
+  game.state = gamePaused ? 'paused' : 'playing';
+  const btn = document.getElementById('pause-btn');
+  if (btn) btn.classList.toggle('paused', gamePaused);
+}
+document.getElementById('pause-btn').addEventListener('click', togglePause);
+
+// ── Fire button DOM events ─────────────────────────────────────
+const fireBtn = document.getElementById('fire-btn');
+fireBtn.addEventListener('touchstart',  e => { e.preventDefault(); rightStick.active = true;  fireBtn.classList.add('pressed'); }, { passive:false });
+fireBtn.addEventListener('touchend',    e => { e.preventDefault(); rightStick.active = false; fireBtn.classList.remove('pressed'); }, { passive:false });
+fireBtn.addEventListener('touchcancel', e => { rightStick.active = false; fireBtn.classList.remove('pressed'); });
+fireBtn.addEventListener('mousedown', () => { rightStick.active = true;  fireBtn.classList.add('pressed'); });
+fireBtn.addEventListener('mouseup',   () => { rightStick.active = false; fireBtn.classList.remove('pressed'); });
+
+function isLeftSide(x) { return x < VW / 2; }
+function inGameView(y) { return y < VIEW_H; }
+
+function onTouchStart(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    // Left stick — anywhere on left half (game area or panel)
+    if (isLeftSide(t.clientX) && !leftStick.active) {
+      leftStick.active = true; leftStick.id = t.identifier;
+      leftStick.baseX = t.clientX; leftStick.baseY = t.clientY;
+      leftStick.dx = 0; leftStick.dy = 0;
+    }
+    // Right side game-area taps also trigger fire (desktop fallback)
+    else if (!isLeftSide(t.clientX) && inGameView(t.clientY) && !rightStick.active) {
+      rightStick.active = true; rightStick.id = t.identifier;
+    }
+  }
+}
+
+function onTouchMove(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier !== leftStick.id) continue;
+    let dx = t.clientX - leftStick.baseX;
+    let dy = t.clientY - leftStick.baseY;
+    const len = Math.sqrt(dx*dx+dy*dy);
+    if (len > STICK_MAX_R) {
+      leftStick.baseX += (dx/len)*(len-STICK_MAX_R);
+      leftStick.baseY += (dy/len)*(len-STICK_MAX_R);
+      dx = t.clientX - leftStick.baseX;
+      dy = t.clientY - leftStick.baseY;
+    }
+    leftStick.dx = Math.max(-1, Math.min(1, dx/STICK_MAX_R));
+    leftStick.dy = Math.max(-1, Math.min(1, dy/STICK_MAX_R));
+  }
+}
+
+function onTouchEnd(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === leftStick.id)  { leftStick.active = false; leftStick.dx = 0; leftStick.dy = 0; }
+    if (t.identifier === rightStick.id) { rightStick.active = false; }
+  }
+}
+
+// ── MAP ──────────────────────────────────────────────────────────
+function generateMap(level) {
+  // Design goals:
+  //   - Wide corridors (2-3 tiles) so kiting is viable
+  //   - Open arena rooms for close-combat skill expression
+  //   - Long sightline corridors for drag-and-snipe
+  //   - Pillar clusters mid-room for cover without blocking movement
+  const map = Array.from({length: ROWS}, () => Array(COLS).fill(1));
+
+  function carveRect(x, y, w, h) {
+    for (let r = Math.max(1,y); r < Math.min(ROWS-1,y+h); r++)
+      for (let c = Math.max(1,x); c < Math.min(COLS-1,x+w); c++)
+        map[r][c] = 0;
+  }
+
+  // Wide corridor: 2 tiles thick minimum
+  function carveCorridor(x1, y1, x2, y2, width) {
+    width = width || 2;
+    const half = Math.floor(width/2);
+    let x=x1, y=y1;
+    // Horizontal leg first, then vertical
+    while (x !== x2) {
+      for (let off=-half; off<width-half; off++) {
+        const rr = Math.max(1, Math.min(ROWS-2, y+off));
+        map[rr][Math.max(1, Math.min(COLS-2, x))] = 0;
+      }
+      x += x<x2 ? 1 : -1;
+    }
+    while (y !== y2) {
+      for (let off=-half; off<width-half; off++) {
+        const cc = Math.max(1, Math.min(COLS-2, x+off));
+        map[Math.max(1, Math.min(ROWS-2, y))][cc] = 0;
+      }
+      y += y<y2 ? 1 : -1;
+    }
+  }
+
+  // Place cover pillars inside a room (single wall tiles, not blocking)
+  function placePillars(room) {
+    // Only in bigger rooms
+    if (room.w < 6 || room.h < 6) return;
+    const count = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {
+      const pc = room.x + 2 + Math.floor(Math.random()*(room.w-4));
+      const pr = room.y + 2 + Math.floor(Math.random()*(room.h-4));
+      map[pr][pc] = 1;
+      // Avoid blocking center of spawn room
+    }
+  }
+
+  const rooms = [];
+  // Mix of room sizes: some tight (sniper nests), some open (arenas)
+  const roomTemplates = [
+    // [minW, maxW, minH, maxH, label]
+    [4, 6, 4, 6],   // standard
+    [6, 9, 6, 9],   // arena
+    [3, 4, 7, 10],  // vertical corridor-room
+    [7, 10, 3, 4],  // horizontal corridor-room
+    [4, 5, 4, 5],   // sniper nest
+  ];
+
+  const numRooms = Math.max(6, Math.floor(COLS * ROWS / 40));
+  const maxAttempts = numRooms * 8;
+
+  for (let attempt = 0; attempt < maxAttempts && rooms.length < numRooms; attempt++) {
+    const tmpl = roomTemplates[Math.floor(Math.random()*roomTemplates.length)];
+    const rw = tmpl[0] + Math.floor(Math.random()*(tmpl[1]-tmpl[0]+1));
+    const rh = tmpl[2] + Math.floor(Math.random()*(tmpl[3]-tmpl[2]+1));
+    const rx = 1 + Math.floor(Math.random()*(COLS-rw-2));
+    const ry = 1 + Math.floor(Math.random()*(ROWS-rh-2));
+
+    // Generous overlap check — allow rooms to breathe but not merge
+    let overlap = false;
+    for (const r of rooms) {
+      if (rx < r.x+r.w+1 && rx+rw > r.x-1 && ry < r.y+r.h+1 && ry+rh > r.y-1) {
+        overlap = true; break;
+      }
+    }
+    if (!overlap) {
+      carveRect(rx, ry, rw, rh);
+      if (rooms.length > 0) {
+        const prev = rooms[rooms.length-1];
+        const cx1 = Math.floor(prev.x + prev.w/2);
+        const cy1 = Math.floor(prev.y + prev.h/2);
+        const cx2 = Math.floor(rx + rw/2);
+        const cy2 = Math.floor(ry + rh/2);
+        // Wider corridors on lower levels, tighter as difficulty rises
+        const corridorW = Math.max(2, 3 - Math.floor(level/3));
+        carveCorridor(cx1, cy1, cx2, cy2, corridorW);
+      }
+      placePillars({x:rx, y:ry, w:rw, h:rh});
+      rooms.push({x:rx, y:ry, w:rw, h:rh});
+    }
+  }
+
+  // Add a couple of extra cross-connections for alternate routes & flanking
+  if (rooms.length >= 4) {
+    for (let i = 0; i < 2; i++) {
+      const a = rooms[Math.floor(Math.random()*rooms.length)];
+      const b = rooms[Math.floor(Math.random()*rooms.length)];
+      if (a !== b) {
+        carveCorridor(
+          Math.floor(a.x+a.w/2), Math.floor(a.y+a.h/2),
+          Math.floor(b.x+b.w/2), Math.floor(b.y+b.h/2), 2
+        );
+      }
+    }
+  }
+
+  // Hard border
+  for (let r=0;r<ROWS;r++){map[r][0]=1;map[r][COLS-1]=1;}
+  for (let c=0;c<COLS;c++){map[0][c]=1;map[ROWS-1][c]=1;}
+
+  return { map, rooms };
+}
+
+function isWall(x, y) {
+  const c = Math.floor(x/TILE), r = Math.floor(y/TILE);
+  if (c<0||c>=COLS||r<0||r>=ROWS) return true;
+  return game.map[r][c]===1;
+}
+
+// ── GAME ─────────────────────────────────────────────────────────
+let game = {};
+let animId;
+
+function startGame() {
+  overlay.style.display = 'none';
+  game.score = 0;
+  initLevel(1);
+  if (animId) cancelAnimationFrame(animId);
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now-last)/1000, 0.05);
+    last = now;
+    update(dt); draw();
+    animId = requestAnimationFrame(loop);
+  }
+  animId = requestAnimationFrame(loop);
+}
+
+function initLevel(level) {
+  // Update map size for this level tier, then recalc scale
+  const tiles = mapTileCount(level);
+  COLS = tiles; ROWS = tiles;
+  BASE_W = tiles * TILE; BASE_H = tiles * TILE;
+  resize();
+  const { map, rooms } = generateMap(level);
+  game.map = map; game.rooms = rooms; game.level = level;
+  game.bullets = []; game.particles = []; game.bloodDecals = [];
+  game.state = 'playing';
+  if (!game.player || game.level === 1) {
+    game.player = createPlayer(rooms[0]);
+  } else {
+    // Reposition, refill health, carry armored state into next level
+    const room = rooms[0];
+    game.player.x = (room.x+Math.floor(room.w/2))*TILE+TILE/2;
+    game.player.y = (room.y+Math.floor(room.h/2))*TILE+TILE/2;
+    game.player.health = 3;
+    game.player.ammo = MAX_AMMO;
+    game.player.invincible = 1.5;
+    // armor tier carries over (set by checkWin before initLevel runs)
+  }
+  game.enemies = [];
+  const numEnemies = 2 + level;
+  const startRoom  = rooms[0];
+
+  // ── Classify rooms by size ─────────────────────────────────────
+  const spawnRooms = rooms.slice(1); // exclude player start room
+  const arenaRooms    = spawnRooms.filter(r => r.w >= 6 && r.h >= 6);   // open — good for tanks+regulars
+  const narrowRooms   = spawnRooms.filter(r => r.w < 5 || r.h < 5);     // corridor-like — good for snipers
+  const mediumRooms   = spawnRooms.filter(r => r.w >= 4 && r.h >= 4);   // general — good for elites
+
+  // ── Build tile pools per placement role ────────────────────────
+  // SNIPER TILES: long sightlines — open tiles that can see far without hitting a wall
+  const sniperTiles = [];
+  for (let r = 1; r < ROWS-1; r++) {
+    for (let c = 1; c < COLS-1; c++) {
+      if (game.map[r][c] !== 0) continue;
+      if (c >= startRoom.x && c < startRoom.x+startRoom.w &&
+          r >= startRoom.y && r < startRoom.y+startRoom.h) continue;
+      // Score: count how many tiles visible in cardinal directions (sightline length)
+      let sight = 0;
+      for (const [dc,dr] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        let steps = 0;
+        while (steps < 18) {
+          const nr = r+dr*(steps+1), nc = c+dc*(steps+1);
+          if (!game.map[nr] || game.map[nr][nc] !== 0) break;
+          steps++;
+        }
+        sight += steps;
+      }
+      if (sight >= 14) sniperTiles.push({ c, r, sight }); // long corridors / open lines
+    }
+  }
+  sniperTiles.sort((a,b) => b.sight - a.sight); // best sightlines first
+
+  // TANK TILES: center of arena rooms — planted in front of regulars
+  const tankTiles = [];
+  for (const room of (arenaRooms.length ? arenaRooms : mediumRooms)) {
+    const cx = room.x + Math.floor(room.w/2);
+    const cy = room.y + Math.floor(room.h/2);
+    tankTiles.push({ c: cx, r: cy, room });
+  }
+
+  // ELITE TILES: near room entrances/exits — positioned to flank approaching players
+  const eliteTiles = [];
+  for (const room of mediumRooms) {
+    // Edges of rooms — near doorways
+    for (const [ec, er] of [
+      [room.x+1,            room.y+Math.floor(room.h/2)],
+      [room.x+room.w-2,     room.y+Math.floor(room.h/2)],
+      [room.x+Math.floor(room.w/2), room.y+1],
+      [room.x+Math.floor(room.w/2), room.y+room.h-2],
+    ]) {
+      if (game.map[er] && game.map[er][ec] === 0) eliteTiles.push({ c: ec, r: er, room });
+    }
+  }
+
+  // REGULAR TILES: behind tank positions in arena rooms, else general floor
+  const regularTiles = [];
+  for (let r = 1; r < ROWS-1; r++) {
+    for (let c = 1; c < COLS-1; c++) {
+      if (game.map[r][c] !== 0) continue;
+      if (c >= startRoom.x && c < startRoom.x+startRoom.w &&
+          r >= startRoom.y && r < startRoom.y+startRoom.h) continue;
+      regularTiles.push({ c, r });
+    }
+  }
+
+  // ── Determine squad composition ────────────────────────────────
+  // Archetypes unlock by level, weighted toward role-filling groups
+  const pickCount = (type) => {
+    if (type === 'sniper')  return level >= 7 ? Math.min(2, Math.floor(numEnemies * 0.2)) : 0;
+    if (type === 'tank')    return level >= 5 ? Math.min(2, Math.floor(numEnemies * 0.2)) : 0;
+    if (type === 'elite')   return level >= 3 ? Math.min(3, Math.floor(numEnemies * 0.25)) : 0;
+    return 0;
+  };
+  const nSnipers  = pickCount('sniper');
+  const nTanks    = pickCount('tank');
+  const nElites   = pickCount('elite');
+  const nRegulars = Math.max(1, numEnemies - nSnipers - nTanks - nElites);
+
+  // Shuffle helpers
+  const shuffle = arr => { for (let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];} return arr; };
+
+  // ── Place with minimum separation tracking ─────────────────────
+  const placed = [];
+  const minSep  = TILE * 4;
+  const isFarEnough = (wx, wy) => placed.every(p => Math.hypot(p.x-wx, p.y-wy) >= minSep);
+
+  const placeFrom = (tilePool, archetype, count) => {
+    let placed_count = 0;
+    for (const tile of tilePool) {
+      if (placed_count >= count) break;
+      const wx = tile.c * TILE + TILE/2, wy = tile.r * TILE + TILE/2;
+      if (!isFarEnough(wx, wy)) continue;
+      const room = tile.room || rooms.find(rm =>
+        tile.c >= rm.x && tile.c < rm.x+rm.w &&
+        tile.r >= rm.y && tile.r < rm.y+rm.h
+      ) || spawnRooms[0];
+      placed.push({ x: wx, y: wy });
+      game.enemies.push(createEnemy(wx, wy, room, level, archetype));
+      placed_count++;
+    }
+    // Fallback: use regularTiles if pool was too small
+    if (placed_count < count) {
+      for (const tile of shuffle([...regularTiles])) {
+        if (placed_count >= count) break;
+        const wx = tile.c * TILE + TILE/2, wy = tile.r * TILE + TILE/2;
+        if (!isFarEnough(wx, wy)) continue;
+        const room = rooms.find(rm =>
+          tile.c >= rm.x && tile.c < rm.x+rm.w &&
+          tile.r >= rm.y && tile.r < rm.y+rm.h
+        ) || spawnRooms[0];
+        placed.push({ x: wx, y: wy });
+        game.enemies.push(createEnemy(wx, wy, room, level, archetype));
+        placed_count++;
+      }
+    }
+  };
+
+  // Place each archetype from its purposeful tile pool
+  placeFrom(sniperTiles,           'sniper',  nSnipers);
+  placeFrom(shuffle([...tankTiles]),'tank',    nTanks);
+  placeFrom(shuffle([...eliteTiles]),'elite',  nElites);
+  placeFrom(shuffle([...regularTiles]),'regular', nRegulars);
+  showWaveAnnounce(`LEVEL ${level}`);
+  updateHUD();
+}
+
+function createPlayer(room) {
+  return {
+    x: (room.x+Math.floor(room.w/2))*TILE+TILE/2,
+    y: (room.y+Math.floor(room.h/2))*TILE+TILE/2,
+    speed: 80, radius: 8, angle: 0,
+    ammo: MAX_AMMO, maxAmmo: MAX_AMMO,
+    weapon: 'pistol',
+    fireCooldown: 0,
+    weaponRange: WEAPONS.pistol.range + RANGE_BONUS,
+    invincible: 0, health: 3, armor: 0  // 0=none 1=blue 2=white
+  };
+}
+
+function createEnemy(x, y, room, level, type) {
+  const archetype = type;
+  const baseHp4   = 1 + Math.floor((level - 1) / 4);  // regular/elite
+  const baseHp8   = 1 + Math.floor((level - 1) / 8);  // bruiser/sniper
+  const patrol    = [
+    {x:room.x*TILE+TILE/2,           y:room.y*TILE+TILE/2},
+    {x:(room.x+room.w-1)*TILE+TILE/2, y:room.y*TILE+TILE/2},
+    {x:(room.x+room.w-1)*TILE+TILE/2, y:(room.y+room.h-1)*TILE+TILE/2},
+    {x:room.x*TILE+TILE/2,           y:(room.y+room.h-1)*TILE+TILE/2}
+  ];
+
+  const base = {
+    x, y, angle: 0, archetype,
+    patrol, patrolIdx: 0,
+    state: 'patrol', alertTimer: 0,
+    hitFlash: 0, flankAngle: null,
+    visionRange: 140 + level*8,
+    visionAngle: Math.PI*0.38,
+  };
+
+  switch (archetype) {
+    case 'regular': return { ...base,
+      radius: 8, speed: 44, health: baseHp4,
+      weapon: 'pistol',
+      weaponRange: WEAPONS.pistol.range,
+      shootRate: WEAPONS.pistol.fireRate,
+      shootCooldown: Math.random()*1.5,
+    };
+    case 'elite': return { ...base,
+      radius: 7, speed: 44, engageSpeed: 52, health: baseHp4,
+      weapon: 'pistol',
+      weaponRange: WEAPONS.pistol.range,
+      shootRate: WEAPONS.pistol.fireRate,
+      shootCooldown: Math.random()*1.0,
+    };
+    case 'tank': return { ...base,
+      radius: 11, speed: 44, health: baseHp8 * 3,
+      weapon: 'shotgun',
+      weaponRange: WEAPONS.shotgun.range,
+      shootRate: WEAPONS.shotgun.fireRate,
+      shootCooldown: Math.random()*1.2,
+    };
+    case 'sniper': return { ...base,
+      radius: 7, speed: 22, health: baseHp8,
+      weapon: 'sniper',
+      weaponRange: WEAPONS.sniper.range,
+      visionRange: WEAPONS.sniper.range * 1.1,
+      visionAngle: Math.PI * 0.55,
+      shootRate: WEAPONS.sniper.fireRate,
+      shootCooldown: 2 + Math.random()*2,
+      chargeTimer: 0,
+      chargeTime: WEAPONS.sniper.chargeTime,
+      blocked: false, vantageX: null, vantageY: null,
+    };
+  }
+}
+
+// ── UPDATE ───────────────────────────────────────────────────────
+function update(dt) {
+  if (game.state !== 'playing' || gamePaused) return;
+  updatePlayer(dt);
+  updateEnemies(dt);
+  updateBullets(dt);
+  updateParticles(dt);
+  checkWin();
+  updateHUD();
+}
+
+function moveWithCollision(entity, dx, dy) {
+  const r = entity.radius * 0.82;
+  let nx = entity.x + dx;
+  if (!isWall(nx+r,entity.y)&&!isWall(nx-r,entity.y)&&
+      !isWall(nx+r,entity.y+r)&&!isWall(nx-r,entity.y+r)&&
+      !isWall(nx+r,entity.y-r)&&!isWall(nx-r,entity.y-r))
+    entity.x = nx;
+  let ny = entity.y + dy;
+  if (!isWall(entity.x,ny+r)&&!isWall(entity.x,ny-r)&&
+      !isWall(entity.x+r,ny+r)&&!isWall(entity.x-r,ny+r)&&
+      !isWall(entity.x+r,ny-r)&&!isWall(entity.x-r,ny-r))
+    entity.y = ny;
+}
+
+function updatePlayer(dt) {
+  const p = game.player;
+  p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+  p.invincible   = Math.max(0, p.invincible - dt);
+
+  // ── Movement ──
+  let mx = leftStick.dx, my = leftStick.dy;
+  if (keys['KeyW']||keys['ArrowUp'])    my -= 1;
+  if (keys['KeyS']||keys['ArrowDown'])  my += 1;
+  if (keys['KeyA']||keys['ArrowLeft'])  mx -= 1;
+  if (keys['KeyD']||keys['ArrowRight']) mx += 1;
+  const mlen = Math.sqrt(mx*mx+my*my) || 1;
+  if (mx!==0||my!==0) moveWithCollision(p, (mx/mlen)*p.speed*dt, (my/mlen)*p.speed*dt);
+
+  // ── Auto-aim: nearest enemy in range WITH clear line of sight ──
+  let nearest = null, nearestDist = Infinity;
+  for (const e of game.enemies) {
+    const dx = e.x - p.x, dy = e.y - p.y;
+    const d = Math.sqrt(dx*dx+dy*dy);
+    if (d < p.weaponRange && d < nearestDist && !lineOfWall(p.x, p.y, e.x, e.y))
+      { nearest = e; nearestDist = d; }
+  }
+
+  // Face nearest enemy if one is in range, otherwise face movement dir
+  if (nearest) {
+    p.angle = Math.atan2(nearest.y - p.y, nearest.x - p.x);
+  } else if (mx!==0||my!==0) {
+    p.angle = Math.atan2(my/mlen, mx/mlen);
+  }
+
+  // ── Fire: button pressed ──
+  const firing = rightStick.active || keys['Space'];
+  if (firing && p.fireCooldown <= 0) {
+    p.fireCooldown = WEAPONS[p.weapon].fireRate;
+    if (p.ammo > 0 && nearest) {
+      const wep = WEAPONS[p.weapon || 'pistol'];
+      p.ammo--;
+      const baseAngle = Math.atan2(nearest.y - p.y, nearest.x - p.x);
+      for (let i = 0; i < wep.pellets; i++) {
+        const spread = wep.pellets > 1
+          ? (i/(wep.pellets-1) - 0.5) * wep.spread * 2
+          : (Math.random()-0.5) * wep.spread;
+        // Sniper bullet gets infinite flag
+        const bullet = mkBullet(p.x, p.y, baseAngle+spread, false, p.weapon||'pistol');
+        if (wep.infinite) bullet.sniper = true;
+        game.bullets.push(bullet);
+      }
+      spawnMuzzle(p.x+Math.cos(p.angle)*12, p.y+Math.sin(p.angle)*12);
+    } else if (p.ammo === 0) {
+      // Out of ammo — melee
+      meleeSweep(p);
+    } else if (!nearest) {
+      sfx.empty();
+    }
+  }
+}
+
+function meleeSweep(p) {
+  const MELEE_RANGE = 52; // wider than enemy contact radius so it feels responsive
+  let hit = false;
+  for (const e of game.enemies) {
+    const dx=e.x-p.x, dy=e.y-p.y, d=Math.sqrt(dx*dx+dy*dy);
+    if (d < MELEE_RANGE) { damageEnemy(e, 1, dx/d, dy/d); hit = true; sfx.melee(); }
+  }
+  // Visual feedback whether hit or whiff
+  spawnParticles(p.x+Math.cos(p.angle)*24, p.y+Math.sin(p.angle)*24, hit ? '#ffffff' : '#334455', hit ? 8 : 3);
+}
+
+function updateEnemies(dt) {
+  const p = game.player;
+
+  // ── Group awareness ───────────────────────────────────────────
+  const chasers = game.enemies.filter(e => e.state === 'chase');
+  const tanks   = chasers.filter(e => e.archetype === 'tank');
+  const hasTank = tanks.length > 0;
+
+  // Is player currently engaged? (any chaser in attack range)
+  const playerEngaged = chasers.some(e => {
+    const d = Math.hypot(p.x - e.x, p.y - e.y);
+    return d <= (e.weaponRange );
+  });
+
+  // Assign roles to chasers once per frame
+  // Tanks: aggro (straight charge). Regulars: shoot behind tank. Elites: flank if player engaged.
+  let flankSlot = 0;
+  const flankAngles = [Math.PI * 0.5, -Math.PI * 0.5, Math.PI * 0.75, -Math.PI * 0.75];
+  chasers.forEach(e => {
+    if (e.archetype === 'tank') {
+      e.role = 'aggro';
+    } else if (e.archetype === 'elite') {
+      // Elite flanks when player is occupied with something else
+      e.role = (playerEngaged && chasers.length > 1) ? 'flank' : 'direct';
+      if (e.role === 'flank') {
+        e.flankAngle = flankAngles[flankSlot % flankAngles.length];
+        flankSlot++;
+      }
+    } else if (e.archetype === 'regular') {
+      // Regular: hang back and shoot from behind the tank if one exists
+      e.role = hasTank ? 'suppress' : 'direct';
+    } else {
+      e.role = 'snipe'; // snipers always snipe
+    }
+  });
+
+  for (const e of game.enemies) {
+    e.hitFlash      = Math.max(0, e.hitFlash - dt * 8);
+    e.shootCooldown = Math.max(0, e.shootCooldown - dt);
+
+    const dx       = p.x - e.x, dy = p.y - e.y;
+    const dist     = Math.hypot(dx, dy);
+    const toPlayer = Math.atan2(dy, dx);
+    const angDiff  = Math.abs(normAngle(toPlayer - e.angle));
+    // Snipers ignore lineOfWall for detection — they spot through gaps
+    const canSee = dist < e.visionRange && angDiff < e.visionAngle &&
+                   !lineOfWall(e.x, e.y, p.x, p.y);
+
+    // Alert logic
+    if (canSee) {
+      if (e.state !== 'chase') {
+        // Staggered alert propagation to non-snipers nearby
+        game.enemies.forEach(other => {
+          if (other === e || other.state === 'chase' || other.anchored) return;
+          const od = Math.hypot(other.x - e.x, other.y - e.y);
+          if (od < TILE * 8) {
+            const delay = 0.3 + (od / (TILE * 8)) * 1.2;
+            setTimeout(() => {
+              if (other.state !== 'chase') { other.state = 'chase'; other.alertTimer = 3; }
+            }, delay * 1000);
+          }
+        });
+      }
+      e.state      = 'chase';
+      e.alertTimer = 2.5;
+    } else if (e.alertTimer > 0) {
+      e.alertTimer -= dt;
+      if (e.alertTimer <= 0) e.state = 'patrol';
+    }
+
+    // ── Patrol ─────────────────────────────────────────────────
+    if (e.state === 'patrol') {
+      if (e.engageSpeed) e.speed = 44; // reset patrol speed
+      const t   = e.patrol[e.patrolIdx];
+      const pdx = t.x - e.x, pdy = t.y - e.y, pd = Math.hypot(pdx, pdy);
+      if (pd < 8) {
+        e.patrolIdx = (e.patrolIdx + 1) % e.patrol.length;
+      } else {
+        const prevX = e.x, prevY = e.y;
+        moveWithCollision(e, (pdx/pd)*e.speed*0.55*dt, (pdy/pd)*e.speed*0.55*dt);
+        e.angle = Math.atan2(pdy, pdx);
+        if (Math.abs(e.x-prevX) < 0.01 && Math.abs(e.y-prevY) < 0.01) {
+          e.patrolIdx = (e.patrolIdx + 1) % e.patrol.length;
+          const rAngle = Math.random() * Math.PI * 2;
+          const rDist  = (3 + Math.random()*4) * TILE;
+          const nx = e.x + Math.cos(rAngle)*rDist;
+          const ny = e.y + Math.sin(rAngle)*rDist;
+          const tc = Math.floor(nx/TILE), tr = Math.floor(ny/TILE);
+          if (game.map[tr] && game.map[tr][tc] === 0)
+            e.patrol[e.patrolIdx] = { x: tc*TILE+TILE/2, y: tr*TILE+TILE/2 };
+        }
+      }
+
+    // ── Engage ─────────────────────────────────────────────────
+    } else {
+      const effectiveRange = e.weaponRange;
+      const inAttackRange  = dist <= effectiveRange;
+      const tooClose       = dist < effectiveRange * 0.55;
+      const role           = e.role || 'direct';
+
+      // ── TANK: charge to shotgun range, blast 3-pellet cone ────────
+      if (e.archetype === 'tank') {
+        const shotRange = e.weaponRange;
+        e.shootCooldown = Math.max(0, e.shootCooldown - dt);
+        // Charge until within shotgun range
+        if (dist > shotRange) {
+          moveWithCollision(e, (dx/dist)*e.speed*dt, (dy/dist)*e.speed*dt);
+        }
+        e.angle = toPlayer;
+        // Blast when close enough and sightline clear
+        if (dist <= shotRange && e.shootCooldown <= 0 && !lineOfWall(e.x,e.y,p.x,p.y)) {
+          e.shootCooldown = e.shootRate;
+          const wep = WEAPONS.shotgun;
+          for (let i = 0; i < wep.pellets; i++) {
+            const offset = (i/(wep.pellets-1) - 0.5) * wep.spread * 2;
+            game.bullets.push(mkBullet(e.x, e.y, toPlayer+offset, true, 'shotgun'));
+          }
+          sfx.enemyShoot();
+          spawnParticles(e.x+Math.cos(toPlayer)*14, e.y+Math.sin(toPlayer)*14, '#ff8800', 5);
+        }
+
+      // ── SNIPER: hold position, charge shot, reposition only if blocked ──
+      } else if (e.archetype === 'sniper') {
+        const hasSightline = !lineOfWall(e.x, e.y, p.x, p.y) && inAttackRange;
+        e.angle = toPlayer;
+
+        if (hasSightline) {
+          // Has clear shot — stay still, charge, fire
+          e.blocked     = false;
+          e.vantageX    = null;
+          e.chargeTimer = (e.chargeTimer || 0) + dt;
+          if (e.chargeTimer >= e.chargeTime && e.shootCooldown <= 0) {
+            e.shootCooldown = e.shootRate;
+            e.chargeTimer   = 0;
+            const sb = mkBullet(e.x, e.y, toPlayer+(Math.random()-0.5)*WEAPONS.sniper.spread, true, 'sniper'); sb.sniper=true; game.bullets.push(sb);
+            sfx.enemyShoot();
+          }
+        } else {
+          // Sightline blocked — reluctantly find a new vantage
+          e.chargeTimer = 0;
+          e.blocked     = true;
+          // Pick a new vantage tile only when needed
+          if (e.vantageX === null) {
+            let bestTile = null, bestScore = -Infinity;
+            for (let attempt = 0; attempt < 24; attempt++) {
+              const spread    = (Math.random() - 0.5) * Math.PI * 0.8;
+              const testDist  = (3 + Math.random() * 5) * TILE;
+              const tx = e.x + Math.cos(toPlayer + spread) * testDist;
+              const ty = e.y + Math.sin(toPlayer + spread) * testDist;
+              const tc = Math.floor(tx/TILE), tr = Math.floor(ty/TILE);
+              if (!game.map[tr] || game.map[tr][tc] !== 0) continue;
+              const td = Math.hypot(p.x - tx, p.y - ty);
+              if (td > e.weaponRange) continue;
+              if (!lineOfWall(tx, ty, p.x, p.y)) {
+                // Prefer positions that are far from player (maintain range advantage)
+                const score = td;
+                if (score > bestScore) { bestScore = score; bestTile = { x: tx, y: ty }; }
+              }
+            }
+            if (bestTile) { e.vantageX = bestTile.x; e.vantageY = bestTile.y; }
+          }
+          // Creep slowly to vantage
+          if (e.vantageX !== null) {
+            const vdx = e.vantageX - e.x, vdy = e.vantageY - e.y;
+            const vd  = Math.hypot(vdx, vdy);
+            if (vd > 6) {
+              moveWithCollision(e, (vdx/vd)*e.speed*dt, (vdy/vd)*e.speed*dt);
+              e.angle = Math.atan2(vdy, vdx);
+            } else {
+              e.vantageX = null; // arrived — will re-evaluate next frame
+            }
+          }
+        }
+
+      // ── ELITE: navigates around walls to flank ────────────────────
+      } else if (e.archetype === 'elite') {
+        e.speed = 52; // speed bump in engage
+        // Determine target position — flank offset or direct
+        let targetX, targetY;
+        if (role === 'flank') {
+          const flankDist = effectiveRange * 0.85;
+          targetX = p.x + Math.cos(e.flankAngle) * flankDist;
+          targetY = p.y + Math.sin(e.flankAngle) * flankDist;
+        } else {
+          targetX = p.x; targetY = p.y;
+        }
+
+        // Wall-awareness: if direct path is blocked, find a nav waypoint
+        const tdx = targetX - e.x, tdy = targetY - e.y, td = Math.hypot(tdx, tdy);
+        const prevX = e.x, prevY = e.y;
+
+        if (td > 10 && !tooClose) {
+          moveWithCollision(e, (tdx/td)*e.speed*dt, (tdy/td)*e.speed*dt);
+          // Detect stuck against wall — sample alternate angles to navigate around it
+          if (Math.abs(e.x-prevX) < 0.1 && Math.abs(e.y-prevY) < 0.1) {
+            // Try perpendicular angles — slide around the wall
+            e.wallSlideAngle = e.wallSlideAngle || (Math.random() > 0.5 ? 1 : -1);
+            const slideAngle = Math.atan2(tdy, tdx) + e.wallSlideAngle * Math.PI * 0.5;
+            moveWithCollision(e, Math.cos(slideAngle)*e.speed*dt, Math.sin(slideAngle)*e.speed*dt);
+            // If still stuck, try the other perpendicular
+            if (Math.abs(e.x-prevX) < 0.1 && Math.abs(e.y-prevY) < 0.1) {
+              e.wallSlideAngle *= -1;
+              const otherSlide = Math.atan2(tdy, tdx) + e.wallSlideAngle * Math.PI * 0.5;
+              moveWithCollision(e, Math.cos(otherSlide)*e.speed*dt, Math.sin(otherSlide)*e.speed*dt);
+            }
+          } else {
+            e.wallSlideAngle = null; // clear when moving freely
+          }
+        } else if (tooClose) {
+          const back = toPlayer + Math.PI;
+          moveWithCollision(e, Math.cos(back)*e.speed*0.7*dt, Math.sin(back)*e.speed*0.7*dt);
+          e.wallSlideAngle = null;
+        }
+        e.angle = toPlayer;
+
+        if (inAttackRange && e.shootCooldown <= 0 && !lineOfWall(e.x,e.y,p.x,p.y)) {
+          e.shootCooldown = e.shootRate;
+          const wep = WEAPONS[e.weapon||'pistol'];
+          game.bullets.push(mkBullet(e.x, e.y, toPlayer+(Math.random()-0.5)*wep.spread, true, e.weapon||'pistol'));
+          sfx.enemyShoot();
+        }
+
+      // ── REGULAR: suppress from behind tank, or direct if no tank ──
+      } else {
+        if (role === 'suppress' && hasTank) {
+          // Hold at medium range behind the tank — let tank absorb hits
+          const suppressRange = effectiveRange * 0.9;
+          if (dist > suppressRange * 1.1) {
+            // Advance cautiously toward player
+            moveWithCollision(e, (dx/dist)*e.speed*0.6*dt, (dy/dist)*e.speed*0.6*dt);
+          } else if (dist < suppressRange * 0.7) {
+            // Back off — don't crowd the tank
+            const back = toPlayer + Math.PI;
+            moveWithCollision(e, Math.cos(back)*e.speed*0.5*dt, Math.sin(back)*e.speed*0.5*dt);
+          }
+          // Regulars in suppress still shoot freely — fire from cover behind tank
+          e.angle = toPlayer;
+          if (e.shootCooldown <= 0 && !lineOfWall(e.x,e.y,p.x,p.y)) {
+            e.shootCooldown = e.shootRate;
+            const wep = WEAPONS[e.weapon||'pistol'];
+            game.bullets.push(mkBullet(e.x, e.y, toPlayer+(Math.random()-0.5)*wep.spread, true, e.weapon||'pistol'));
+            sfx.enemyShoot();
+          }
+        } else {
+          // Direct: kite and shoot
+          if (tooClose) {
+            const back = toPlayer + Math.PI;
+            moveWithCollision(e, Math.cos(back)*e.speed*0.7*dt, Math.sin(back)*e.speed*0.7*dt);
+          } else if (!inAttackRange) {
+            moveWithCollision(e, (dx/dist)*e.speed*dt, (dy/dist)*e.speed*dt);
+          }
+          e.angle = toPlayer;
+          if (inAttackRange && e.shootCooldown <= 0 && !lineOfWall(e.x,e.y,p.x,p.y)) {
+            e.shootCooldown = e.shootRate;
+            const wepR = WEAPONS[e.weapon||'pistol']; game.bullets.push(mkBullet(e.x, e.y, toPlayer+(Math.random()-0.5)*wepR.spread, true, e.weapon||'pistol'));
+            sfx.enemyShoot();
+          }
+        }
+      }
+    }
+
+    if (dist < e.radius+p.radius+2 && p.invincible <= 0) hitPlayer();
+  }
+}
+
+function lineOfWall(x1,y1,x2,y2) {
+  const steps=Math.ceil(Math.sqrt((x2-x1)**2+(y2-y1)**2)/6);
+  for (let i=1;i<steps;i++){const t=i/steps;if(isWall(x1+(x2-x1)*t,y1+(y2-y1)*t))return true;}
+  return false;
+}
+function normAngle(a){while(a>Math.PI)a-=Math.PI*2;while(a<-Math.PI)a+=Math.PI*2;return a;}
+
+function mkBullet(x,y,angle,fromEnemy,weapon){
+  const wep  = weapon ? WEAPONS[weapon] : null;
+  const spd  = wep.bulletSpeed;
+  const rng  = wep.range;
+  const life = rng / spd;
+  return{x,y,vx:Math.cos(angle)*spd,vy:Math.sin(angle)*spd,fromEnemy,radius:3,life,maxLife:life};
+}
+
+function updateBullets(dt) {
+  const p = game.player;
+  for (let i=game.bullets.length-1;i>=0;i--) {
+    const b=game.bullets[i];
+    b.x+=b.vx*dt; b.y+=b.vy*dt; b.life-=dt;
+    if ((b.sniper ? false : b.life<=0) || isWall(b.x,b.y)){
+      spawnParticles(b.x,b.y,b.fromEnemy?'#ff5030':'#ffe060',2);
+      game.bullets.splice(i,1); continue;
+    }
+    if (b.fromEnemy){
+      const dx=p.x-b.x,dy=p.y-b.y;
+      if (Math.sqrt(dx*dx+dy*dy)<p.radius&&p.invincible<=0){game.bullets.splice(i,1);hitPlayer();}
+    } else {
+      for (const e of game.enemies){
+        const dx=e.x-b.x,dy=e.y-b.y;
+        if (Math.sqrt(dx*dx+dy*dy)<e.radius){game.bullets.splice(i,1);damageEnemy(e,1,b.vx/360,b.vy/360);break;}
+      }
+    }
+  }
+}
+
+function damageEnemy(e,dmg,nx,ny){
+  e.health-=dmg; e.hitFlash=1; e.state='chase'; e.alertTimer=3;
+  sfx.hit();
+  spawnParticles(e.x,e.y,'#ff3010',5);
+  if(e.health<=0) killEnemy(e);
+}
+function killEnemy(e){
+  const idx=game.enemies.indexOf(e); if(idx===-1)return;
+  game.enemies.splice(idx,1);
+  updateHUD();
+  sfx.kill();
+  game.score+=100*game.level;
+  const drop=3+Math.floor(Math.random()*4);
+  game.player.ammo=Math.min(game.player.maxAmmo,game.player.ammo+drop);
+  spawnParticles(e.x,e.y,'#ff1800',14);
+  spawnBloodDecal(e.x,e.y);
+  addKillMsg(`+${drop} AMMO`);
+}
+function hitPlayer(){
+  const p = game.player;
+  p.invincible = 1.5;
+  sfx.playerHit();
+  if (p.armor >= 2) {
+    // White → Blue
+    p.armor = 1;
+    spawnParticles(p.x, p.y, '#ffffff', 12);
+  } else if (p.armor === 1) {
+    // Blue → Green (armor gone, health intact)
+    p.armor = 0;
+    spawnParticles(p.x, p.y, '#00cfff', 10);
+  } else {
+    // No armor — lose a heart
+    p.health--;
+    spawnParticles(p.x, p.y, '#ff0040', 8);
+    if (p.health <= 0) { playerDied(); return; }
+  }
+  updateHUD();
+}
+function playerDied(){
+  sfx.die();
+  gameOver();
+}
+function gameOver(){
+  game.state='gameover';
+  overlay.innerHTML=`<h1>K.I.A.</h1><div class="subtitle">// MISSION FAILED //</div>
+    <div class="instructions">Final Score: <span>${String(game.score).padStart(6,'0')}</span><br>Level Reached: <span>${game.level}</span></div>
+    <button id="start-btn">RETRY</button>`;
+  overlay.style.display='flex';
+  game.score=0;
+  document.getElementById('start-btn').addEventListener('click', startGame);
+}
+function checkWin(){
+  if(game.enemies.length===0&&game.state==='playing'){
+    game.score+=500*game.level;
+    // Upgrade armor tier if cleared at full health
+    if (game.player.health === 3) {
+      if (game.player.armor === 0) game.player.armor = 1;       // green clear → blue
+      else if (game.player.armor === 1) game.player.armor = 2;  // blue clear → white
+      // white clear → stay white (already max)
+    }
+    // Always refill health for next level
+    game.player.health = 3;
+    showWaveAnnounce('SECTOR CLEAR');
+    game.state='transition'; sfx.levelUp(); setTimeout(()=>initLevel(game.level+1),2000);
+  }
+}
+
+// ── PARTICLES ────────────────────────────────────────────────────
+function spawnParticles(x,y,color,count){
+  for(let i=0;i<count;i++){
+    const a=Math.random()*Math.PI*2, s=30+Math.random()*80;
+    game.particles.push({x,y,color,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+      life:.3+Math.random()*.4,maxLife:.3+Math.random()*.4,size:1.5+Math.random()*2.5});
+  }
+}
+function spawnMuzzle(x,y){game.particles.push({x,y,color:'#ffffa0',vx:0,vy:0,life:.07,maxLife:.07,size:6,muzzle:true});}
+function spawnBloodDecal(x,y){game.bloodDecals.push({x,y,r:5+Math.random()*7,alpha:.45});}
+function updateParticles(dt){
+  for(let i=game.particles.length-1;i>=0;i--){
+    const p=game.particles[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.88;p.vy*=.88;p.life-=dt;
+    if(p.life<=0)game.particles.splice(i,1);
+  }
+}
+function addKillMsg(txt){
+  const el=document.createElement('div'); el.className='kill-msg'; el.textContent=txt;
+  killFeed.appendChild(el);
+  setTimeout(()=>{el.style.opacity='0';},800);
+  setTimeout(()=>el.remove(),2800);
+  if(killFeed.children.length>4)killFeed.removeChild(killFeed.firstChild);
+}
+function showWaveAnnounce(txt){
+  waveAnnounce.textContent=txt; waveAnnounce.style.opacity='1';
+  setTimeout(()=>{waveAnnounce.style.opacity='0';},1600);
+}
+
+// ── DRAW ─────────────────────────────────────────────────────────
+function draw() {
+  ctx.clearRect(0,0,VW,VH);
+  ctx.fillStyle='#060a10'; ctx.fillRect(0,0,VW,VH);
+
+  // Camera: center viewport on player, clamped to map edges
+  const p = game.player;
+  const camX = p ? Math.max(0, Math.min(BASE_W - VIEW_W, p.x - VIEW_W/2)) : 0;
+  const camY = p ? Math.max(0, Math.min(BASE_H - VIEW_H, p.y - VIEW_H/2)) : 0;
+
+  // Clip draw to game viewport strip (top portion of screen)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, VIEW_W, VIEW_H);
+  ctx.clip();
+
+  // World transform: shift world so camX/camY is at screen 0,0
+  ctx.save();
+  ctx.translate(-camX, -camY);
+  drawMap(); drawBloodDecals(); drawBullets(); drawEnemies(); drawPlayer(); drawParticles();
+  ctx.restore();
+
+  ctx.restore(); // end clip
+
+  drawJoystick();
+}
+
+function drawMap(){
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const x=c*TILE, y=r*TILE;
+      if(game.map[r][c]===1){
+        // Wall — clearly darker, solid
+        ctx.fillStyle='#06090f'; ctx.fillRect(x,y,TILE,TILE);
+        // Top edge highlight where wall meets floor below it
+        if(r<ROWS-1 && game.map[r+1][c]===0){
+          ctx.fillStyle='#2a5080'; ctx.fillRect(x,y+TILE-3,TILE,3);
+        }
+        // Bottom edge shadow where floor meets wall above it
+        if(r>0 && game.map[r-1][c]===0){
+          ctx.fillStyle='#1e3d60'; ctx.fillRect(x,y,TILE,3);
+        }
+        // Left/right edge accents
+        if(c<COLS-1 && game.map[r][c+1]===0){
+          ctx.fillStyle='#1a3050'; ctx.fillRect(x+TILE-2,y,2,TILE);
+        }
+        if(c>0 && game.map[r][c-1]===0){
+          ctx.fillStyle='#1a3050'; ctx.fillRect(x,y,2,TILE);
+        }
+      } else {
+        // Floor — slightly lighter than wall for clear read
+        ctx.fillStyle='#0d1825'; ctx.fillRect(x,y,TILE,TILE);
+        // Subtle grid
+        ctx.strokeStyle='rgba(255,255,255,0.018)'; ctx.strokeRect(x,y,TILE,TILE);
+      }
+    }
+  }
+  // Radial darkness vignette around player
+  const p=game.player;
+  const grd=ctx.createRadialGradient(p.x,p.y,30,p.x,p.y,200);
+  grd.addColorStop(0,'rgba(0,0,0,0)');
+  grd.addColorStop(0.5,'rgba(0,0,0,0)');
+  grd.addColorStop(1,'rgba(0,0,0,0.82)');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,BASE_W,BASE_H);
+}
+
+function drawBloodDecals(){
+  for(const d of game.bloodDecals){
+    ctx.save(); ctx.globalAlpha=d.alpha; ctx.fillStyle='#280000';
+    ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,Math.PI*2);ctx.fill(); ctx.restore();
+  }
+}
+
+function drawBullets(){
+  for(const b of game.bullets){
+    ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(Math.atan2(b.vy,b.vx));
+    ctx.shadowColor=b.fromEnemy?'#ff4020':'#ffe060'; ctx.shadowBlur=7;
+    ctx.fillStyle=b.fromEnemy?'#ff6040':'#ffffa0';
+    ctx.fillRect(-6,-1.5,9,3); ctx.restore();
+  }
+}
+
+function drawEnemies(){
+  const p = game.player;
+  for(const e of game.enemies){
+    ctx.save(); ctx.translate(e.x,e.y);
+
+    const arc       = e.archetype || 'regular';
+    const fl        = e.hitFlash;
+    const chasing   = e.state === 'chase';
+    const effectiveRange = e.weaponRange;
+    const distToPlayer   = Math.hypot(p.x-e.x, p.y-e.y);
+    const inRange        = distToPlayer <= effectiveRange;
+
+    // Per-archetype palette
+    const palette = {
+      regular: { idle:'#7a2215', chase:'#cc1a00', nub:'#ff6040', glow:'#ff2000', range:'255,60,20' },
+      elite:   { idle:'#7a1560', chase:'#cc0099', nub:'#ff40cc', glow:'#ff00aa', range:'255,20,160' },
+      tank:    { idle:'#1a3a1a', chase:'#1a6a1a', nub:'#40ff60', glow:'#00ff40', range:'40,200,80'  },
+      sniper:  { idle:'#1a2a4a', chase:'#1a4a8a', nub:'#4080ff', glow:'#0060ff', range:'40,100,255' },
+    };
+    const pal = palette[arc];
+
+    // Range glow
+    const grd = ctx.createRadialGradient(0,0,e.radius,0,0,effectiveRange);
+    grd.addColorStop(0, inRange ? `rgba(${pal.range},0.08)` : `rgba(${pal.range},0.02)`);
+    grd.addColorStop(1, `rgba(${pal.range},0)`);
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(0,0,effectiveRange,0,Math.PI*2); ctx.fill();
+
+    // Sniper: charge indicator and laser sight
+    if (arc === 'sniper' && chasing) {
+      const hasSight = !lineOfWall(e.x,e.y,p.x,p.y);
+      if (!e.blocked && hasSight) {
+        // Charging — line brightens and thickens as shot approaches
+        const chargeRatio = Math.min(1, (e.chargeTimer||0) / (e.chargeTime||1.8));
+        ctx.save();
+        ctx.globalAlpha = 0.08 + chargeRatio * 0.55;
+        ctx.strokeStyle = chargeRatio > 0.7 ? '#ff4040' : '#4080ff';
+        ctx.lineWidth   = 0.5 + chargeRatio * 2;
+        if (chargeRatio > 0.85)
+          ctx.globalAlpha *= (0.7 + Math.sin(Date.now()*0.04)*0.3); // flicker near fire
+        ctx.beginPath(); ctx.moveTo(0,0);
+        ctx.lineTo(p.x-e.x, p.y-e.y); ctx.stroke();
+        // Charge arc ring around body
+        ctx.lineWidth = 1.5; ctx.globalAlpha = chargeRatio * 0.7;
+        ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(0,0, e.radius+3, -Math.PI/2, -Math.PI/2 + chargeRatio*Math.PI*2);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        // Blocked / repositioning — dim dotted line
+        ctx.save();
+        ctx.globalAlpha = 0.06;
+        ctx.strokeStyle = '#4080ff'; ctx.lineWidth = 0.5;
+        ctx.setLineDash([3,10]);
+        ctx.beginPath(); ctx.moveTo(0,0);
+        ctx.lineTo(p.x-e.x, p.y-e.y); ctx.stroke();
+        ctx.setLineDash([]); ctx.restore();
+      }
+    }
+
+    // Body
+    ctx.rotate(e.angle);
+    ctx.shadowColor = fl>.5 ? '#fff' : pal.glow;
+    ctx.shadowBlur  = fl>0 ? 14 : (chasing ? 10 : 4);
+    ctx.fillStyle   = fl>.5 ? '#ffffff' : (chasing ? pal.chase : pal.idle);
+    ctx.beginPath(); ctx.arc(0,0,e.radius,0,Math.PI*2); ctx.fill();
+
+    // Tank: square shape overlay to distinguish from circles
+    if (arc === 'tank') {
+      ctx.fillStyle = fl>.5 ? 'rgba(255,255,255,0.3)' : 'rgba(40,200,80,0.2)';
+      ctx.fillRect(-e.radius*0.7, -e.radius*0.7, e.radius*1.4, e.radius*1.4);
+    }
+
+    // Facing nub
+    ctx.fillStyle = fl>.5 ? '#ffcc00' : pal.nub;
+    const nubLen = arc === 'sniper' ? 10 : arc === 'tank' ? 4 : 6;
+    ctx.beginPath();
+    ctx.moveTo(e.radius, 0);
+    ctx.lineTo(e.radius+nubLen, -3);
+    ctx.lineTo(e.radius+nubLen,  3);
+    ctx.fill();
+
+    // HP pips
+    ctx.rotate(-e.angle);
+    for(let h=0;h<e.health;h++){
+      ctx.fillStyle = arc==='tank' ? '#40ff60' : arc==='sniper' ? '#4080ff' : arc==='elite' ? '#ff40cc' : '#ff3030';
+      ctx.fillRect(-4+h*5, -e.radius-7, 3, 2);
+    }
+    ctx.restore();
+  }
+}
+
+function drawPlayer(){
+  const p=game.player;
+  if(p.invincible>0&&Math.floor(p.invincible*10)%2===0)return;
+  ctx.save(); ctx.translate(p.x,p.y);
+
+  // Soft range glow — mirrors enemy range indicator language
+  const pgrd = ctx.createRadialGradient(0,0,p.radius,0,0,p.weaponRange);
+  pgrd.addColorStop(0,'rgba(0,180,255,0.06)');
+  pgrd.addColorStop(1,'rgba(0,180,255,0)');
+  ctx.fillStyle = pgrd;
+  ctx.beginPath(); ctx.arc(0,0,p.weaponRange,0,Math.PI*2); ctx.fill();
+
+  // Body
+  ctx.shadowColor='#00cfff'; ctx.shadowBlur=12;
+  ctx.fillStyle='#003d5c';
+  ctx.beginPath();ctx.arc(0,0,p.radius,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=4; ctx.fillStyle='#00cfff';
+  ctx.beginPath();ctx.arc(0,0,p.radius-3,0,Math.PI*2);ctx.fill();
+
+  // Facing nub
+  ctx.rotate(p.angle); ctx.shadowBlur=0; ctx.fillStyle='#0088bb';
+  ctx.fillRect(7,-1.5,8,3);
+
+  ctx.restore();
+}
+
+function drawParticles(){
+  for(const p of game.particles){
+    const alpha=p.life/p.maxLife;
+    ctx.save();ctx.globalAlpha=alpha;ctx.fillStyle=p.color;
+    if(p.muzzle){ctx.shadowColor=p.color;ctx.shadowBlur=10;}
+    ctx.beginPath();ctx.arc(p.x,p.y,p.muzzle?p.size:p.size*alpha,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ── Cabinet SVG frame ─────────────────────────────────────────
+function drawCabinetFrame() {
+  const svg = document.getElementById('cabinet-frame');
+  if (!svg) return;
+  const w = VW, h = VH, ph = PANEL_H, gy = h - ph;
+  // Bezel border top-edge glow line + corner chamfers
+  const chamfer = 18;
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.innerHTML = `
+    <!-- Screen bezel — top three sides -->
+    <path d="M0,${gy} L0,${chamfer} Q0,0 ${chamfer},0 L${w-chamfer},0 Q${w},0 ${w},${chamfer} L${w},${gy}"
+      fill="none" stroke="rgba(0,207,255,0.18)" stroke-width="1.5"/>
+    <!-- Scan line overlay on game view -->
+    <rect x="0" y="0" width="${w}" height="${gy}"
+      fill="url(#scanlines)" opacity="0.025"/>
+    <!-- Panel divider with chamfered corners -->
+    <path d="M0,${gy} L${w},${gy}" stroke="rgba(0,207,255,0.22)" stroke-width="1"/>
+    <line x1="0" y1="${gy}" x2="${w}" y2="${gy}" stroke="rgba(0,207,255,0.06)" stroke-width="4"/>
+    <!-- Corner accent dots -->
+    <circle cx="${chamfer}" cy="${chamfer}" r="2" fill="rgba(0,207,255,0.3)"/>
+    <circle cx="${w-chamfer}" cy="${chamfer}" r="2" fill="rgba(0,207,255,0.3)"/>
+    <!-- Panel surface texture gradient -->
+    <rect x="0" y="${gy}" width="${w}" height="${ph}"
+      fill="url(#panelGrad)" opacity="1"/>
+    <!-- Rivet decorations on panel edges -->
+    <circle cx="18" cy="${gy+ph/2}" r="3" fill="#0a1a28" stroke="rgba(0,207,255,0.2)" stroke-width="1"/>
+    <circle cx="${w-18}" cy="${gy+ph/2}" r="3" fill="#0a1a28" stroke="rgba(0,207,255,0.2)" stroke-width="1"/>
+    <!-- RAID wordmark on panel -->
+    <text x="${w/2}" y="${gy+14}" text-anchor="middle"
+      font-family="Orbitron,sans-serif" font-size="7" font-weight="900"
+      fill="rgba(0,207,255,0.12)" letter-spacing="6">RAID</text>
+    <defs>
+      <linearGradient id="panelGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#040c18" stop-opacity="1"/>
+        <stop offset="100%" stop-color="#020408" stop-opacity="1"/>
+      </linearGradient>
+      <pattern id="scanlines" x="0" y="0" width="2" height="4" patternUnits="userSpaceOnUse">
+        <rect x="0" y="0" width="2" height="2" fill="rgba(0,0,0,0.4)"/>
+      </pattern>
+    </defs>`;
+}
+
+// ── Stick knob — update DOM position ──────────────────────────
+function updateStickKnob() {
+  const knob = document.getElementById('stick-knob');
+  if (!knob) return;
+  const travel = 24; // px max offset inside housing
+  const ox = leftStick.dx * travel;
+  const oy = leftStick.dy * travel;
+  knob.style.transform = `translate(${ox}px,${oy}px)`;
+  knob.classList.toggle('active', leftStick.active);
+}
+
+// ── Fire button state sync ─────────────────────────────────────
+function updateFireBtn() {
+  const btn = document.getElementById('fire-btn');
+  if (!btn || !game.player || !game.enemies) return;
+  const hasTarget = game.enemies.some(e =>
+    Math.hypot(e.x-game.player.x, e.y-game.player.y) < game.player.weaponRange
+  );
+  if (rightStick.active) {
+    btn.className = 'pressed';
+  } else if (hasTarget) {
+    btn.className = 'ready';
+  } else {
+    btn.className = 'idle';
+  }
+}
+
+function drawJoystick(){
+  jCtx.clearRect(0,0,VW,VH);
+  // joystick canvas now only draws floating left stick when active in game area
+  if (leftStick.active) {
+    const bx=leftStick.baseX, by=leftStick.baseY;
+    const kx=bx+leftStick.dx*STICK_MAX_R, ky=by+leftStick.dy*STICK_MAX_R;
+    // Only draw floating stick if touch started in game view area
+    if (by < VIEW_H) {
+      jCtx.save(); jCtx.globalAlpha=.14; jCtx.strokeStyle='#00cfff'; jCtx.lineWidth=1.5;
+      jCtx.beginPath();jCtx.arc(bx,by,STICK_MAX_R,0,Math.PI*2);jCtx.stroke(); jCtx.restore();
+      jCtx.save(); jCtx.globalAlpha=.45; jCtx.fillStyle='#00cfff';
+      jCtx.shadowColor='#00cfff'; jCtx.shadowBlur=10;
+      jCtx.beginPath();jCtx.arc(kx,ky,16,0,Math.PI*2);jCtx.fill(); jCtx.restore();
+    }
+  }
+  updateStickKnob();
+  updateFireBtn();
+}
+
+function updateHUD(){
+  const p = game.player;
+  // Health — per-slot heart colors
+  const hp    = p.health || 0;
+  const armor = p.armor  || 0;
+  // Heart color by armor tier, then by hp count if no armor
+  let hpClass = '', heartStyle = '';
+  if (armor === 2) {
+    // White tier — bright white glow
+    heartStyle = 'color:#ffffff;text-shadow:0 0 14px rgba(255,255,255,1),0 0 4px rgba(200,220,255,0.8)';
+  } else if (armor === 1) {
+    // Blue tier
+    heartStyle = 'color:#00cfff;text-shadow:0 0 10px rgba(0,180,255,0.9)';
+  } else {
+    // No armor — green/yellow/red by hp
+    hpClass = hp >= 3 ? 'hearts-full' : hp === 2 ? 'hearts-one-down' : 'hearts-last';
+  }
+  hudLives.className = 'hud-value ' + hpClass;
+  const st = heartStyle ? ` style="${heartStyle}"` : '';
+  hudLives.innerHTML =
+    `<span${st}>${'♥'.repeat(hp)}</span>` +
+    `<span style="opacity:0.2">${'♡'.repeat(3 - hp)}</span>`;
+  // Ammo
+  hudAmmo.textContent = p.ammo;
+  hudAmmo.className = 'hud-value' + (p.ammo===0?' danger': p.ammo<=5?' warning':'');
+  // Level
+  hudLevel.textContent = game.level || 1;
+  hudLevel.className = 'hud-value';
+  // Foes
+  const foeCount = game.enemies ? game.enemies.length : 0;
+  hudFoes.textContent = foeCount;
+  hudFoes.className = 'hud-value' + (foeCount===0?'': foeCount<=2?' warning':' danger');
+  // Score
+  hudScore.textContent = String(game.score).padStart(6,'0');
+}
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+</script>
+</body>
+</html>
